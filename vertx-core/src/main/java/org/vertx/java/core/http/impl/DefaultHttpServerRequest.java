@@ -16,6 +16,11 @@
 
 package org.vertx.java.core.http.impl;
 
+import java.net.InetSocketAddress;
+import java.util.HashMap;
+import java.util.List;
+import java.util.Map;
+
 import org.jboss.netty.handler.codec.http.HttpRequest;
 import org.jboss.netty.handler.codec.http.QueryStringDecoder;
 import org.vertx.java.core.Handler;
@@ -24,10 +29,6 @@ import org.vertx.java.core.http.HttpServerRequest;
 import org.vertx.java.core.http.HttpServerResponse;
 import org.vertx.java.core.logging.Logger;
 import org.vertx.java.core.logging.impl.LoggerFactory;
-
-import java.util.HashMap;
-import java.util.List;
-import java.util.Map;
 
 /**
  *
@@ -76,6 +77,38 @@ public class DefaultHttpServerRequest extends HttpServerRequest {
       }
     }
     return params;
+  }
+
+  @Override
+  public String ip() {
+      String ip = headers.get("X-Forwarded-For");
+      if (ip == null || ip.length() == 0 || "unknown".equalsIgnoreCase(ip)) {
+          ip = headers.get("Proxy-Client-IP");
+      }
+      if (ip == null || ip.length() == 0 || "unknown".equalsIgnoreCase(ip)) {
+          ip = headers.get("WL-Proxy-Client-IP");
+      }
+      if (ip == null || ip.length() == 0 || "unknown".equalsIgnoreCase(ip)) {
+          ip = headers.get("HTTP_CLIENT_IP");
+      }
+      if (ip == null || ip.length() == 0 || "unknown".equalsIgnoreCase(ip)) {
+          ip = headers.get("HTTP_X_FORWARDED_FOR");
+      }
+      if (ip == null || ip.length() == 0 || "unknown".equalsIgnoreCase(ip)) {
+          ip = ((InetSocketAddress) conn.channel().getRemoteAddress()).getAddress().getHostAddress();
+          // ip = req.getRemoteAddr();
+      }
+      if (ip.contains(",")) {
+          String[] ips = ip.split(",");
+          for (String i : ips) {
+              i = i.trim();
+              if (!i.equals("unknown")) {
+                  ip = i;
+                  break;
+              }
+          }
+      }
+      return ip;
   }
 
   public void dataHandler(Handler<Buffer> dataHandler) {

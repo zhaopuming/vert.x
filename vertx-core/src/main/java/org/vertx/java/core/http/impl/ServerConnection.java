@@ -307,4 +307,7 @@ class ServerConnection extends AbstractConnection {
       });
     }
   }
+  Channel channel() {
+      return channel;
+  }
 }

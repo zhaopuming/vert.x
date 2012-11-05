@@ -86,4 +86,9 @@ public abstract class HttpServerRequest extends HttpReadStreamBase {
    * Returns a map of all the parameters in the request
    */
   public abstract Map<String, String> params();
+
+  /**
+   * Returns the ip of the request
+   */
+  public abstract String ip();
 }
