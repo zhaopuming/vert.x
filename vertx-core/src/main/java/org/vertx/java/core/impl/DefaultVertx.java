@@ -16,6 +16,15 @@
 
 package org.vertx.java.core.impl;
 
+import java.util.HashMap;
+import java.util.Map;
+import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.Executor;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicLong;
+
 import org.jboss.netty.channel.socket.nio.NioWorker;
 import org.jboss.netty.channel.socket.nio.NioWorkerPool;
 import org.jboss.netty.util.HashedWheelTimer;
@@ -40,11 +49,6 @@ import org.vertx.java.core.net.impl.ServerID;
 import org.vertx.java.core.shareddata.SharedData;
 import org.vertx.java.core.sockjs.SockJSServer;
 import org.vertx.java.core.sockjs.impl.DefaultSockJSServer;
-
-import java.util.HashMap;
-import java.util.Map;
-import java.util.concurrent.*;
-import java.util.concurrent.atomic.AtomicLong;
 
 /**
  * @author <a href="http://tfox.org">Tim Fox</a>
@@ -116,6 +120,10 @@ public class DefaultVertx extends VertxInternal {
 
   public HttpServer createHttpServer() {
     return new DefaultHttpServer(this);
+  }
+
+  public HttpServer createHttpServer(int idleTimeout) {
+    return new DefaultHttpServer(this, idleTimeout);
   }
 
   public HttpClient createHttpClient() {

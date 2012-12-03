@@ -85,6 +85,11 @@ public abstract class Vertx {
   public abstract HttpServer createHttpServer();
 
   /**
+   * Create a HTTP/HTTPS server, with a max idleTimeout for opening connections.
+   */
+  public abstract HttpServer createHttpServer(int idleTimeout);
+
+  /**
    * Create a HTTP/HTTPS client
    */
   public abstract HttpClient createHttpClient();

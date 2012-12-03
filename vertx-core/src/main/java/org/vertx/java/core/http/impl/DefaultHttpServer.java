@@ -16,19 +16,64 @@
 
 package org.vertx.java.core.http.impl;
 
+import static org.jboss.netty.handler.codec.http.HttpHeaders.Names.CONNECTION;
+import static org.jboss.netty.handler.codec.http.HttpHeaders.Values.WEBSOCKET;
+import static org.jboss.netty.handler.codec.http.HttpResponseStatus.BAD_REQUEST;
+import static org.jboss.netty.handler.codec.http.HttpResponseStatus.CONTINUE;
+import static org.jboss.netty.handler.codec.http.HttpResponseStatus.METHOD_NOT_ALLOWED;
+import static org.jboss.netty.handler.codec.http.HttpResponseStatus.NOT_FOUND;
+import static org.jboss.netty.handler.codec.http.HttpVersion.HTTP_1_1;
+
+import java.net.InetAddress;
+import java.net.InetSocketAddress;
+import java.net.URI;
+import java.net.URISyntaxException;
+import java.net.UnknownHostException;
+import java.nio.charset.Charset;
+import java.util.Map;
+import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.atomic.AtomicInteger;
+import java.util.concurrent.atomic.AtomicLong;
+
+import javax.net.ssl.SSLEngine;
+
 import org.jboss.netty.bootstrap.ServerBootstrap;
 import org.jboss.netty.buffer.ChannelBuffer;
 import org.jboss.netty.buffer.ChannelBuffers;
-import org.jboss.netty.channel.*;
+import org.jboss.netty.channel.Channel;
+import org.jboss.netty.channel.ChannelFactory;
+import org.jboss.netty.channel.ChannelHandlerContext;
+import org.jboss.netty.channel.ChannelPipeline;
+import org.jboss.netty.channel.ChannelPipelineFactory;
+import org.jboss.netty.channel.ChannelState;
+import org.jboss.netty.channel.ChannelStateEvent;
+import org.jboss.netty.channel.Channels;
+import org.jboss.netty.channel.ExceptionEvent;
+import org.jboss.netty.channel.MessageEvent;
+import org.jboss.netty.channel.SimpleChannelUpstreamHandler;
 import org.jboss.netty.channel.group.ChannelGroup;
 import org.jboss.netty.channel.group.ChannelGroupFuture;
 import org.jboss.netty.channel.group.ChannelGroupFutureListener;
 import org.jboss.netty.channel.group.DefaultChannelGroup;
 import org.jboss.netty.channel.socket.nio.NioServerSocketChannelFactory;
 import org.jboss.netty.channel.socket.nio.NioSocketChannel;
-import org.jboss.netty.handler.codec.http.*;
+import org.jboss.netty.handler.codec.http.DefaultHttpResponse;
+import org.jboss.netty.handler.codec.http.HttpChunk;
+import org.jboss.netty.handler.codec.http.HttpHeaders;
+import org.jboss.netty.handler.codec.http.HttpMethod;
+import org.jboss.netty.handler.codec.http.HttpRequest;
+import org.jboss.netty.handler.codec.http.HttpRequestDecoder;
+import org.jboss.netty.handler.codec.http.HttpResponse;
+import org.jboss.netty.handler.codec.http.HttpResponseEncoder;
+import org.jboss.netty.handler.codec.http.HttpResponseStatus;
 import org.jboss.netty.handler.ssl.SslHandler;
 import org.jboss.netty.handler.stream.ChunkedWriteHandler;
+import org.jboss.netty.handler.timeout.IdleState;
+import org.jboss.netty.handler.timeout.IdleStateAwareChannelHandler;
+import org.jboss.netty.handler.timeout.IdleStateEvent;
+import org.jboss.netty.handler.timeout.IdleStateHandler;
+import org.jboss.netty.util.HashedWheelTimer;
+import org.jboss.netty.util.Timer;
 import org.vertx.java.core.Handler;
 import org.vertx.java.core.http.HttpServer;
 import org.vertx.java.core.http.HttpServerRequest;
@@ -41,21 +86,14 @@ import org.vertx.java.core.http.impl.ws.hybi08.Handshake08;
 import org.vertx.java.core.http.impl.ws.hybi17.HandshakeRFC6455;
 import org.vertx.java.core.impl.Context;
 import org.vertx.java.core.impl.VertxInternal;
+import org.vertx.java.core.json.JsonObject;
 import org.vertx.java.core.logging.Logger;
 import org.vertx.java.core.logging.impl.LoggerFactory;
-import org.vertx.java.core.net.impl.*;
-
-import javax.net.ssl.SSLEngine;
-import java.net.*;
-import java.nio.charset.Charset;
-import java.util.Map;
-import java.util.concurrent.ConcurrentHashMap;
-import java.util.concurrent.atomic.AtomicInteger;
-
-import static org.jboss.netty.handler.codec.http.HttpHeaders.Names.CONNECTION;
-import static org.jboss.netty.handler.codec.http.HttpHeaders.Values.WEBSOCKET;
-import static org.jboss.netty.handler.codec.http.HttpResponseStatus.*;
-import static org.jboss.netty.handler.codec.http.HttpVersion.HTTP_1_1;
+import org.vertx.java.core.net.impl.HandlerHolder;
+import org.vertx.java.core.net.impl.HandlerManager;
+import org.vertx.java.core.net.impl.ServerID;
+import org.vertx.java.core.net.impl.TCPSSLHelper;
+import org.vertx.java.core.net.impl.VertxWorkerPool;
 
 import se.cgbystrom.netty.FlashPolicyHandler;
 
@@ -83,7 +121,15 @@ public class DefaultHttpServer implements HttpServer {
   private HandlerManager<HttpServerRequest> reqHandlerManager = new HandlerManager<>(availableWorkers);
   private HandlerManager<ServerWebSocket> wsHandlerManager = new HandlerManager<>(availableWorkers);
 
+  private final Timer timer = new HashedWheelTimer();
+  private final IdleStateHandler idleStateHandler;
+
+  
   public DefaultHttpServer(VertxInternal vertx) {
+      this(vertx, 0);
+  }
+
+  public DefaultHttpServer(VertxInternal vertx, int idleTimeout) {
     this.vertx = vertx;
     ctx = vertx.getOrAssignContext();
     if (vertx.isWorker()) {
@@ -94,6 +140,7 @@ public class DefaultHttpServer implements HttpServer {
         close();
       }
     });
+    this.idleStateHandler = new IdleStateHandler(timer, 0, 0, idleTimeout);
   }
 
   public HttpServer requestHandler(Handler<HttpServerRequest> requestHandler) {
@@ -176,7 +223,15 @@ public class DefaultHttpServer implements HttpServer {
             pipeline.addLast("decoder", new HttpRequestDecoder());
             pipeline.addLast("encoder", new HttpResponseEncoder());
 
+            pipeline.addLast("idle", idleStateHandler);
+            pipeline.addLast("idleHandler", new IdleStateAwareChannelHandler() {
+                @Override
+                public void channelIdle(ChannelHandlerContext ctx, IdleStateEvent e) {
+                  e.getChannel().close();
+                }
+            });
             pipeline.addLast("chunkedWriter", new ChunkedWriteHandler());       // For large file / sendfile support
+
             pipeline.addLast("handler", new ServerHandler());
             return pipeline;
           }
@@ -205,6 +260,9 @@ public class DefaultHttpServer implements HttpServer {
     return this;
   }
 
+  public void dummy() {
+      
+  }
   public void close() {
     close(null);
   }
@@ -549,7 +607,7 @@ public class DefaultHttpServer implements HttpServer {
         throws Exception {
       final NioSocketChannel ch = (NioSocketChannel) e.getChannel();
       final ServerConnection conn = connectionMap.get(ch);
-      e.getCause().printStackTrace();
+      // e.getCause().printStackTrace();
       final Throwable t = e.getCause();
       ch.close();
       if (conn != null && t instanceof Exception) {
