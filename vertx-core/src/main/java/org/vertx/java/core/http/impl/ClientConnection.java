@@ -41,6 +41,7 @@ import org.vertx.java.core.logging.impl.LoggerFactory;
 import java.io.IOException;
 import java.util.Queue;
 import java.util.concurrent.ConcurrentLinkedQueue;
+import java.util.concurrent.atomic.AtomicLong;
 
 /**
  * @author <a href="http://tfox.org">Tim Fox</a>
@@ -255,7 +256,11 @@ class ClientConnection extends AbstractConnection {
     return channel.write(obj);
   }
 
+  static AtomicLong reqCnt = new AtomicLong(); 
   void setCurrentRequest(DefaultHttpClientRequest req) {
+      if (reqCnt.getAndIncrement() % 100 == 0) {
+          System.out.println("CurrentRequests:" + requests.size());
+      }
     if (currentRequest != null) {
       throw new IllegalStateException("Connection is already writing a request");
     }

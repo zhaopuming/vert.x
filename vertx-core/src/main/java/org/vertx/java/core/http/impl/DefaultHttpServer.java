@@ -68,7 +68,6 @@ import org.jboss.netty.handler.codec.http.HttpResponseEncoder;
 import org.jboss.netty.handler.codec.http.HttpResponseStatus;
 import org.jboss.netty.handler.ssl.SslHandler;
 import org.jboss.netty.handler.stream.ChunkedWriteHandler;
-import org.jboss.netty.handler.timeout.IdleState;
 import org.jboss.netty.handler.timeout.IdleStateAwareChannelHandler;
 import org.jboss.netty.handler.timeout.IdleStateEvent;
 import org.jboss.netty.handler.timeout.IdleStateHandler;
@@ -86,7 +85,6 @@ import org.vertx.java.core.http.impl.ws.hybi08.Handshake08;
 import org.vertx.java.core.http.impl.ws.hybi17.HandshakeRFC6455;
 import org.vertx.java.core.impl.Context;
 import org.vertx.java.core.impl.VertxInternal;
-import org.vertx.java.core.json.JsonObject;
 import org.vertx.java.core.logging.Logger;
 import org.vertx.java.core.logging.impl.LoggerFactory;
 import org.vertx.java.core.net.impl.HandlerHolder;
@@ -227,7 +225,9 @@ public class DefaultHttpServer implements HttpServer {
             pipeline.addLast("idleHandler", new IdleStateAwareChannelHandler() {
                 @Override
                 public void channelIdle(ChannelHandlerContext ctx, IdleStateEvent e) {
-                  e.getChannel().close();
+                    Channel ch = e.getChannel();
+                    closeConnection(ch);
+                    ch.close();
                 }
             });
             pipeline.addLast("chunkedWriter", new ChunkedWriteHandler());       // For large file / sendfile support
@@ -457,7 +457,25 @@ public class DefaultHttpServer implements HttpServer {
     });
   }
 
+  private void closeConnection(Channel ch) {
+      final ServerConnection conn = connectionMap.remove(ch);
+      if (conn != null) {
+        conn.getContext().execute(new Runnable() {
+          public void run() {
+            conn.handleClosed();
+          }
+        });
+        if (idleClosedCnt.getAndIncrement() % 100 == 0) {
+            long cntDiff = totalCnt.get() - idleClosedCnt.get() - closedCnt.get();
+          System.out.println("IdleClosed: " + idleClosedCnt.get() + "/" + closedCnt.get() + "/" + totalCnt.get() + "|" + cntDiff + "/" + connectionMap.size());
+        }
+      }
+  }
   private static final AtomicInteger count = new AtomicInteger(0);
+
+  final AtomicLong closedCnt = new AtomicLong();
+  final AtomicLong idleClosedCnt = new AtomicLong();
+  final AtomicLong totalCnt = new AtomicLong();
 
   public class ServerHandler extends SimpleChannelUpstreamHandler {
 
@@ -481,6 +499,7 @@ public class DefaultHttpServer implements HttpServer {
 
     @Override
     public void messageReceived(ChannelHandlerContext ctx, MessageEvent e) throws Exception {
+        totalCnt.getAndIncrement();
       final NioSocketChannel ch = (NioSocketChannel) e.getChannel();
       Object msg = e.getMessage();
       ServerConnection conn = connectionMap.get(ch);
@@ -637,6 +656,10 @@ public class DefaultHttpServer implements HttpServer {
             conn.handleClosed();
           }
         });
+        if (closedCnt.getAndIncrement() % 100 == 0) {
+            long cntDiff = totalCnt.get() - idleClosedCnt.get() - closedCnt.get();
+          System.out.println("NormalClosed: " + idleClosedCnt.get() + "/" + closedCnt.get() + "/" + totalCnt.get() + "|" + cntDiff + "/" + connectionMap.size());
+        }
       }
     }
 

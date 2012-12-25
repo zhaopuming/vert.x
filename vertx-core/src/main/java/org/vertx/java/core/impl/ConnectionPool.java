@@ -22,6 +22,7 @@ import org.vertx.java.core.logging.impl.LoggerFactory;
 
 import java.util.LinkedList;
 import java.util.Queue;
+import java.util.concurrent.atomic.AtomicLong;
 
 /**
  * <p>A simple, non-blocking pool implementation</p>
@@ -56,11 +57,19 @@ public abstract class ConnectionPool<T> {
     log.trace("available: " + available.size() + " connection count: " + connectionCount + " waiters: " + waiters.size());
   }
 
+  public final AtomicLong getConCnt = new AtomicLong();
+  public void debug() {
+      if (getConCnt.getAndIncrement() % 100 == 0) {
+          System.out.println("available: " + available.size() + " connection count: " + connectionCount + " waiters: " + waiters.size());
+      }
+  }
 
   public void getConnection(Handler<T> handler, Context context) {
+      debug();
     boolean connect = false;
-    T conn;
+    T conn = null;
     outer: synchronized (this) {
+      /**
       conn = available.poll();
       if (conn != null) {
         break outer;
@@ -74,6 +83,21 @@ public abstract class ConnectionPool<T> {
         // Add to waiters
         waiters.add(new Waiter(handler, context));
       }
+      **/
+        if (connectionCount < maxPoolSize) {
+          //Create new connection
+          connect = true;
+          connectionCount++;
+          break outer;
+        } else {
+            conn = available.poll();
+            if (conn != null) {
+                break outer;
+            } else {
+                // Add to waiters
+                waiters.add(new Waiter(handler, context));
+            }
+        }
     }
     // We do this outside the sync block to minimise the critical section
     if (conn != null) {
@@ -111,6 +135,7 @@ public abstract class ConnectionPool<T> {
   /**
    * Return a connection to the pool so it can be used by others.
    */
+  /**
   public void returnConnection(final T conn) {
     Waiter waiter;
     synchronized (this) {
@@ -129,7 +154,30 @@ public abstract class ConnectionPool<T> {
       });
     }
   }
+  **/
 
+  public void returnConnection(final T conn) {
+    Waiter waiter;
+    final T aCon;
+    synchronized (this) {
+      //Return it to the pool
+        available.add(conn);
+      waiter = waiters.poll();
+      if (waiter != null) {
+          aCon = available.poll();
+      } else {
+          aCon = null;
+      }
+    }
+    if (waiter != null && aCon != null) {
+      final Waiter w = waiter;
+      w.context.execute(new Runnable() {
+        public void run() {
+          w.handler.handle(aCon);
+        }
+      });
+    }
+  }
   /**
    * Close the pool
    */
