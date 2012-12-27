@@ -57,33 +57,27 @@ public abstract class ConnectionPool<T> {
     log.trace("available: " + available.size() + " connection count: " + connectionCount + " waiters: " + waiters.size());
   }
 
-  public final AtomicLong getConCnt = new AtomicLong();
-  public void debug() {
-      if (getConCnt.getAndIncrement() % 100 == 0) {
-          System.out.println("available: " + available.size() + " connection count: " + connectionCount + " waiters: " + waiters.size());
-      }
+  public String debug() {
+     return "available: " + available.size() + " connection count: " + connectionCount + " waiters: " + waiters.size();
   }
 
   public void getConnection(Handler<T> handler, Context context) {
-      debug();
     boolean connect = false;
     T conn = null;
     outer: synchronized (this) {
-      /**
-      conn = available.poll();
-      if (conn != null) {
-        break outer;
-      } else {
-        if (connectionCount < maxPoolSize) {
-          //Create new connection
-          connect = true;
-          connectionCount++;
-          break outer;
-        }
-        // Add to waiters
-        waiters.add(new Waiter(handler, context));
-      }
-      **/
+//      conn = available.poll();
+//      if (conn != null) {
+//        break outer;
+//      } else {
+//        if (connectionCount < maxPoolSize) {
+//          //Create new connection
+//          connect = true;
+//          connectionCount++;
+//          break outer;
+//        }
+//        // Add to waiters
+//        waiters.add(new Waiter(handler, context));
+//      }
         if (connectionCount < maxPoolSize) {
           //Create new connection
           connect = true;

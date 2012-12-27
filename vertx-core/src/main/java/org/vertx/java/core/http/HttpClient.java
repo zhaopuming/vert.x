@@ -359,4 +359,12 @@ public interface HttpClient {
    */
   String getTrustStorePassword();
 
+  /**
+   * @return The max pipeline size
+   */
+  int getMaxPipelineSize();
+
+  void setMaxPipelineSize(int size);
+  String getHost();
+  int getPort();
 }

@@ -39,6 +39,7 @@ import org.vertx.java.core.logging.Logger;
 import org.vertx.java.core.logging.impl.LoggerFactory;
 
 import java.io.IOException;
+import java.util.Date;
 import java.util.Queue;
 import java.util.concurrent.ConcurrentLinkedQueue;
 import java.util.concurrent.atomic.AtomicLong;
@@ -71,6 +72,10 @@ class ClientConnection extends AbstractConnection {
   private final Queue<DefaultHttpClientRequest> requests = new ConcurrentLinkedQueue();
   private volatile DefaultHttpClientResponse currentResponse;
   private DefaultWebSocket ws;
+
+  public int queueSize() {
+      return requests.size();
+  }
 
   void toWebSocket(final String uri,
                    final Handler<WebSocket> wsConnect,
@@ -129,6 +134,13 @@ class ClientConnection extends AbstractConnection {
     } catch (Exception e) {
       handleException(e);
     }
+  }
+
+  public void shutdown() {
+      requests.clear();
+      currentRequest = null;
+      currentResponse = null;
+      internalClose();
   }
 
   @Override
@@ -259,7 +271,7 @@ class ClientConnection extends AbstractConnection {
   static AtomicLong reqCnt = new AtomicLong(); 
   void setCurrentRequest(DefaultHttpClientRequest req) {
       if (reqCnt.getAndIncrement() % 100 == 0) {
-          System.out.println("CurrentRequests:" + requests.size());
+          log.info("[" + client.getHost() + ":" + client.getPort() + "] CurrentRequests:" + requests.size());
       }
     if (currentRequest != null) {
       throw new IllegalStateException("Connection is already writing a request");
