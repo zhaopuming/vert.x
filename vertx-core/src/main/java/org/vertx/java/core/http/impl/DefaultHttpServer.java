@@ -507,6 +507,7 @@ public class DefaultHttpServer implements HttpServer {
                 });
                 countClosed(downClosedCnt, "DownStream");
             }
+            ctx.sendDownstream(e);
         }
 
     }
