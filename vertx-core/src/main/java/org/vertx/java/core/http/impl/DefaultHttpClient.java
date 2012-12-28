@@ -16,9 +16,28 @@
 
 package org.vertx.java.core.http.impl;
 
+import java.net.InetSocketAddress;
+import java.util.Map;
+import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.atomic.AtomicLong;
+
+import javax.net.ssl.SSLEngine;
+import javax.net.ssl.SSLHandshakeException;
+
 import org.jboss.netty.bootstrap.ClientBootstrap;
 import org.jboss.netty.buffer.ChannelBuffer;
-import org.jboss.netty.channel.*;
+import org.jboss.netty.channel.Channel;
+import org.jboss.netty.channel.ChannelFuture;
+import org.jboss.netty.channel.ChannelFutureListener;
+import org.jboss.netty.channel.ChannelHandlerContext;
+import org.jboss.netty.channel.ChannelPipeline;
+import org.jboss.netty.channel.ChannelPipelineFactory;
+import org.jboss.netty.channel.ChannelStateEvent;
+import org.jboss.netty.channel.Channels;
+import org.jboss.netty.channel.ExceptionEvent;
+import org.jboss.netty.channel.MessageEvent;
+import org.jboss.netty.channel.SimpleChannelDownstreamHandler;
+import org.jboss.netty.channel.SimpleChannelUpstreamHandler;
 import org.jboss.netty.channel.socket.nio.NioClientSocketChannelFactory;
 import org.jboss.netty.channel.socket.nio.NioSocketChannel;
 import org.jboss.netty.handler.codec.http.HttpChunk;
@@ -29,7 +48,11 @@ import org.jboss.netty.handler.ssl.SslHandler;
 import org.vertx.java.core.Handler;
 import org.vertx.java.core.SimpleHandler;
 import org.vertx.java.core.buffer.Buffer;
-import org.vertx.java.core.http.*;
+import org.vertx.java.core.http.HttpClient;
+import org.vertx.java.core.http.HttpClientRequest;
+import org.vertx.java.core.http.HttpClientResponse;
+import org.vertx.java.core.http.WebSocket;
+import org.vertx.java.core.http.WebSocketVersion;
 import org.vertx.java.core.http.impl.ws.WebSocketFrame;
 import org.vertx.java.core.impl.ConnectionPool;
 import org.vertx.java.core.impl.Context;
@@ -39,13 +62,6 @@ import org.vertx.java.core.logging.Logger;
 import org.vertx.java.core.logging.impl.LoggerFactory;
 import org.vertx.java.core.net.impl.TCPSSLHelper;
 import org.vertx.java.core.net.impl.VertxWorkerPool;
-
-import javax.net.ssl.SSLEngine;
-import javax.net.ssl.SSLHandshakeException;
-import java.net.InetSocketAddress;
-import java.util.Map;
-import java.util.concurrent.ConcurrentHashMap;
-import java.util.concurrent.atomic.AtomicLong;
 
 public class DefaultHttpClient implements HttpClient {
 
@@ -373,6 +389,7 @@ public class DefaultHttpClient implements HttpClient {
             bootstrap.setPipelineFactory(new ChannelPipelineFactory() {
                 public ChannelPipeline getPipeline() throws Exception {
                     ChannelPipeline pipeline = Channels.pipeline();
+                    pipeline.addLast("downCloseHandler", new ConnectionCloseHandler());
                     if (tcpHelper.isSSL()) {
                         SSLEngine engine = tcpHelper.getSSLContext().createSSLEngine();
                         engine.setUseClientMode(true); // We are on the tcpHelper side of the connection
@@ -454,6 +471,34 @@ public class DefaultHttpClient implements HttpClient {
         } else {
             log.error("Unhandled exception", t);
         }
+    }
+
+    public class ConnectionCloseHandler extends SimpleChannelDownstreamHandler {
+
+        @Override
+        public void closeRequested(ChannelHandlerContext ctx, ChannelStateEvent e) {
+            close(ctx, e);
+        }
+
+        @Override
+        public void disconnectRequested(ChannelHandlerContext ctx, ChannelStateEvent e) {
+            close(ctx, e);
+        }
+
+        private void close(ChannelHandlerContext ctx, ChannelStateEvent e) {
+            final NioSocketChannel ch = (NioSocketChannel) e.getChannel();
+            final ClientConnection conn = connectionMap.remove(ch);
+            if (conn != null) {
+                conn.getContext().execute(new Runnable() {
+                    public void run() {
+                        conn.handleClosed();
+                    }
+                });
+                log.info("Downstream closing client connection.");
+            }
+            ctx.sendDownstream(e);
+        }
+
     }
 
     private class ClientHandler extends SimpleChannelUpstreamHandler {
