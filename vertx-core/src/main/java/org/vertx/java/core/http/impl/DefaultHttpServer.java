@@ -30,6 +30,8 @@ import java.net.URI;
 import java.net.URISyntaxException;
 import java.net.UnknownHostException;
 import java.nio.charset.Charset;
+import java.util.ArrayList;
+import java.util.List;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.atomic.AtomicLong;
@@ -137,7 +139,7 @@ public class DefaultHttpServer implements HttpServer {
                 close();
             }
         });
-        this.idleStateHandler = new IdleStateHandler(timer, idleTimeout, idleTimeout, idleTimeout);
+        this.idleStateHandler = new IdleStateHandler(timer, 0, 0, idleTimeout);
     }
 
     public HttpServer requestHandler(Handler<HttpServerRequest> requestHandler) {
@@ -474,16 +476,45 @@ public class DefaultHttpServer implements HttpServer {
     final AtomicLong closedCnt = new AtomicLong();
     final AtomicLong idleClosedCnt = new AtomicLong();
     final AtomicLong downClosedCnt = new AtomicLong();
+    final AtomicLong exceptCnt = new AtomicLong();
     final AtomicLong totalCnt = new AtomicLong();
+    final AtomicLong reuseCnt = new AtomicLong();
+    final AtomicLong zombieCnt = new AtomicLong();
 
     private void countClosed(AtomicLong cnt, String name) {
-        if (cnt.getAndIncrement() % 100 == 0) {
-            long cntDiff = totalCnt.get() - idleClosedCnt.get() - closedCnt.get() - downClosedCnt.get() ;
-            log.info(name + " Closed: " + "/idle:" + idleClosedCnt.get() + "/normal:" + closedCnt.get() + "/down:" + downClosedCnt.get() + "/total:" + totalCnt.get() + "/diff:"
-                    + cntDiff + "/map:" + connectionMap.size());
+        if (cnt.getAndIncrement() % 1000 == 0) {
+            long cntDiff = totalCnt.get() - idleClosedCnt.get() - closedCnt.get() - downClosedCnt.get() - exceptCnt.get();
+            log.info(name + " Closed: " + "/idle:" + idleClosedCnt.get() + "/normal:" + closedCnt.get() + "/down:" + downClosedCnt.get()
+                    + "/except:" + exceptCnt.get()
+                    + "/total:" + totalCnt.get() + "/diff:"
+                    + cntDiff + "/map:" + connectionMap.size() + "/reuse:" + reuseCnt.get() + "/zombieCnt:" + zombieCnt.get());
+            long openCnt = 0;
+            long boundCnt = 0;
+            long connCnt = 0;
+            long readableCnt = 0;
+            long writableCnt = 0;
+            for (Channel ch : connectionMap.keySet()) {
+                if (ch.isOpen()) {
+                    ++openCnt;
+                }
+                if (ch.isConnected()) {
+                    ++connCnt;
+                }
+                if (ch.isBound()) {
+                    ++boundCnt;
+                }
+                if (ch.isReadable()) {
+                    ++readableCnt;
+                }
+                if (ch.isWritable()) {
+                    ++writableCnt;
+                }
+            }
+            log.info("ConnectionMap Status: " + "/opened:" + openCnt + "/bound:" + boundCnt + "/conned:" + connCnt + "/readable:"
+                    + readableCnt + "/writable:" + writableCnt);
         }
     }
-   
+
     public class ConnectionCloseHandler extends SimpleChannelDownstreamHandler {
 
         @Override
@@ -625,13 +656,18 @@ public class DefaultHttpServer implements HttpServer {
                     if (conn == null) {
                         HandlerHolder<HttpServerRequest> reqHandler = reqHandlerManager.chooseHandler(ch.getWorker());
                         if (reqHandler != null) {
-                            conn = new ServerConnection(vertx, ch, reqHandler.context);
-                            totalCnt.getAndIncrement();
-                            conn.requestHandler(reqHandler.handler);
-                            connectionMap.put(ch, conn);
-                            conn.handleMessage(msg);
+                            if (!ch.isOpen()) {
+                                zombieCnt.getAndIncrement();
+                            } else {
+                                conn = new ServerConnection(vertx, ch, reqHandler.context);
+                                totalCnt.getAndIncrement();
+                                conn.requestHandler(reqHandler.handler);
+                                connectionMap.put(ch, conn);
+                                conn.handleMessage(msg);
+                            }
                         }
                     } else {
+                        reuseCnt.getAndIncrement();
                         conn.handleMessage(msg);
                     }
                 }
@@ -662,11 +698,12 @@ public class DefaultHttpServer implements HttpServer {
         public void exceptionCaught(ChannelHandlerContext ctx, ExceptionEvent e)
                 throws Exception {
             final NioSocketChannel ch = (NioSocketChannel) e.getChannel();
-            final ServerConnection conn = connectionMap.get(ch);
+            final ServerConnection conn = connectionMap.remove(ch);
             // e.getCause().printStackTrace();
             final Throwable t = e.getCause();
             ch.close();
             if (conn != null && t instanceof Exception) {
+                countClosed(exceptCnt, "Excpetion");
                 conn.getContext().execute(new Runnable() {
                     public void run() {
                         conn.handleException((Exception) t);

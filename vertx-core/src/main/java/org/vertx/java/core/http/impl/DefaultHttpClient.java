@@ -494,7 +494,7 @@ public class DefaultHttpClient implements HttpClient {
                         conn.handleClosed();
                     }
                 });
-                log.info("Downstream closing client connection.");
+//                log.info("Downstream closing client connection.");
             }
             ctx.sendDownstream(e);
         }
