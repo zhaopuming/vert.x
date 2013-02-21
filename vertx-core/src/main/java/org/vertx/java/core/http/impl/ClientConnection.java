@@ -270,7 +270,7 @@ class ClientConnection extends AbstractConnection {
 
   static AtomicLong reqCnt = new AtomicLong(); 
   void setCurrentRequest(DefaultHttpClientRequest req) {
-      if (reqCnt.getAndIncrement() % 100 == 0) {
+      if (reqCnt.getAndIncrement() % 1000 == 0) {
           log.info("[" + client.getHost() + ":" + client.getPort() + "] CurrentRequests:" + requests.size());
       }
     if (currentRequest != null) {

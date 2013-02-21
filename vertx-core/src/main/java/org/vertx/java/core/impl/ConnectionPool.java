@@ -78,7 +78,7 @@ public abstract class ConnectionPool<T> {
 //        // Add to waiters
 //        waiters.add(new Waiter(handler, context));
 //      }
-        if (connectionCount < maxPoolSize) {
+        if (available.size() < maxPoolSize && connectionCount < maxPoolSize) {
           //Create new connection
           connect = true;
           connectionCount++;

@@ -348,7 +348,7 @@ public class DefaultHttpClient implements HttpClient {
 
     void getConnection(Handler<ClientConnection> handler, Context context) {
 
-        if (getConCnt.getAndIncrement() % 100 == 0) {
+        if (getConCnt.getAndIncrement() % 1000 == 0) {
             log.info("[" + host + ":" + port + "] Pool: " + pool.debug());
         }
         pool.getConnection(handler, context);
