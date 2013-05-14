@@ -488,13 +488,13 @@ public class DefaultHttpClient implements HttpClient {
         private void close(ChannelHandlerContext ctx, ChannelStateEvent e) {
             final NioSocketChannel ch = (NioSocketChannel) e.getChannel();
             final ClientConnection conn = connectionMap.remove(ch);
+
             if (conn != null) {
-                conn.getContext().execute(new Runnable() {
+                tcpHelper.runOnCorrectThread(ch, new Runnable() {
                     public void run() {
                         conn.handleClosed();
                     }
                 });
-//                log.info("Downstream closing client connection.");
             }
             ctx.sendDownstream(e);
         }
@@ -529,6 +529,7 @@ public class DefaultHttpClient implements HttpClient {
 
         @Override
         public void exceptionCaught(ChannelHandlerContext chctx, ExceptionEvent e) {
+            log.info(e);
             final NioSocketChannel ch = (NioSocketChannel) e.getChannel();
             final ClientConnection conn = connectionMap.get(ch);
             final Throwable t = e.getCause();
